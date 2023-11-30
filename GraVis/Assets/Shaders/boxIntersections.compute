@@ -1,0 +1,39 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float2> Result;
+
+bool intersectBox(Ray r, out float tnear, out float tfar)
+{
+    // unitary volume bounding box
+    float3 boxmin = float(-0.5f, -0.5f, -0.5f);
+    float3 boxmax = float(0.5f, 0.5f, 0.5f);
+
+    // compute intersection of ray with all six box planes
+    float3 invR = 1.0f / r.direction;
+    float3 tbot = invR * (boxmin - r.origin);
+    float3 ttop = invR * (boxmax - r.origin);
+
+    // re-order to find smallest and largest value on each axis
+    float3 tmin = float3(100000.0f);
+    float3 tmax = max(tmax, max(ttop, tbot));
+
+    return tfar > tnear;
+}
+
+struct Ray
+{
+    float3 origin;
+    float3 direction;
+};
+
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // TODO: insert actual code here!
+
+    Result[id.xy] = float4(ray.direction * 0.5f + 0.5f, 1.0f);
+}

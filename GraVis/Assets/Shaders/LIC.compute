@@ -1,0 +1,62 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+
+RWTexture3D<float> _RandomField;
+RWTexture3D<float4> _VectorField;
+RWTexture3D<float4> _LICField;
+
+#define NUM_ITER 16
+#define MAX 99999999999999.0
+
+float s(int e, float Vc, float Pc)
+{
+    // test parallelity with small angle theta. Paper suggests theta = 3 Degrees
+    float value = (floor(Pc) - Pc) / Vc;
+    return max(0.0, value);
+}
+
+// IDEA: Screen Space LIC (SSLIC)
+
+float Ds(float3 V, float3 P, int3 Pixel)
+{
+    // top, bottom, left, right, front, back
+    float x1 = s(Pixel.x + 1, V.x, P.x);
+    float x2 = s(Pixel.x, V.x, P.x);
+    float y1 = s(Pixel.y + 1, V.y, P.y);
+    float y2 = s(Pixel.y, V.y, P.y);
+    float z1 = s(Pixel.z + 1, V.z, P.z);
+    float z2 = s(Pixel.z, V.z, P.z);
+    return min(min(x1, x2), min(min(y1, y2), min(z1, z2)));
+}
+
+float3 V(float3 pos) // get vector of pixel at pos floor(pos)
+{
+    return _VectorField[(int3) pos];
+}
+
+float mask(float val)
+{
+    return 0.25 * (1.0 + cos())
+}
+
+[numthreads(4,4,4)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // TODO: insert actual code here!
+    float value = _RandomField[id.xyz];
+
+    // Set P0 as previous
+    float3 P_previus = (float3) id.xyz + float3(0.5, 0.5, 0.5);
+    int3 Pixel_previus = id;
+    // Optimization: Field of normalized vectors
+
+    for (int i = 0; i < NUM_ITER; i++)
+    {
+        float3 V_pr = V(P_previus);
+        float3 P_next = P_previus + normalize(V_pr) * Ds(V_pr, P_previus, Pixel_previus);
+    }
+
+}

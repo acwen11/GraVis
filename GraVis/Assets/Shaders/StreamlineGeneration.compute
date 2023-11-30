@@ -1,0 +1,34 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+#include "Assets/Shaders/Library.cginc"
+
+RWStructuredBuffer<float> Streamlines;
+RWStructuredBuffer<float> _Volume;
+
+float4 _Dimensions;
+
+float4 getValueOfPos(float3 pos)
+{
+    // Space pos is in [0,1], transform it to [0, Dimension]
+    //int3 index = int3((int)(pos.x * _Dimensions.x), (int)(pos.y * _Dimensions.y), (int)(pos.z * _Dimensions.z));
+    int3 index = (int3) round(pos * _Dimensions.xyz);
+
+    // Shift of the 4th Dimension (dimension of data sample)
+    int arrayPos = (index.x + _Dimensions.x * index.y + _Dimensions.x * _Dimensions.y * index.z);
+    arrayPos *= (int)_Dimensions.w;
+    // Fill color with 3 subsequent data values (ignore gb values in case of 1-dim data)
+    return float4(
+        clamp(abs(_Volume[arrayPos + 0]), 0, 1),
+        clamp(abs(_Volume[arrayPos + 1]), 0, 1),
+        clamp(abs(_Volume[arrayPos + 2]), 0, 1),
+        0);
+}
+
+[numthreads(32,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // TODO: insert actual code here!
+
+    //Streamlines[id.x] =
+}

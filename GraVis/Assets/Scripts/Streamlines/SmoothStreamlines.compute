@@ -1,0 +1,103 @@
+
+#pragma kernel Main
+
+struct Vertex {
+    float3 position;
+    float3 normal;
+    float4 color;
+    float2 uv;
+};
+
+struct Input {
+    float3 vertex;
+};
+
+StructuredBuffer<float3> InVertices;
+
+RWByteAddressBuffer OutIndices;
+RWByteAddressBuffer OutVertices;
+
+float calculateBending(float3 xPrevious, float3 x, float3 xNext)
+{
+    float3 v1 = x - xPrevious;
+    float3 v2 = xNext - x;
+    return dot(v1,v2);
+}
+
+float calculateStrength(float3 xPrevious, float3 x)
+{
+    return min(1.0,length(xPrevious - x) * 5000.0);
+}
+
+float3 calculateNormal(float3 xPrevious, float3 x, float3 xNext)
+{
+    float3 v1 = normalize(x - xPrevious);
+    float3 v2 = normalize(xNext - x);
+    return normalize(cross(v1, v2));
+}
+
+float3 calculateTangent(float3 x, float3 xNext)
+{
+    return normalize(xNext - x);
+}
+
+uint arraySize;
+
+[numthreads(128, 1, 1)]
+void Main(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    uint vidx = idx * 14; 
+
+    float3 v1 = InVertices[id.x];
+    float3 vPrevious = InVertices[(id.x - 1) % arraySize];
+    float3 vNext = InVertices[(id.x + 1) % arraySize];
+
+    float3 pretangent = normalize(v1 - vPrevious);
+    float3 tangent = normalize(vNext - vPrevious);
+    float3 prenormal = normalize(tangent - pretangent);
+    float3 normal = normalize(cross(tangent, normalize(vNext + vPrevious)));
+    
+    float radius = 0.001f;
+
+    // Color.r is curvature (Menger curvature with radius 1)
+    // Color.g is Distance to center
+    float R = 1;
+    float A = 0.5 * length(cross(normalize(v1 - vPrevious), normalize(vNext - vPrevious)));
+
+    float4 Color = float4((4*A)/R * 10.0, 1, 1, 1);
+    // Store Pos
+    OutVertices.Store(vidx << 2, asuint(v1.x));
+    OutVertices.Store((vidx + 1) << 2, asuint(v1.y));
+    OutVertices.Store((vidx + 2) << 2, asuint(v1.z));
+
+    // Store Normals
+    OutVertices.Store((vidx + 3) << 2, asuint(normal.x));
+    OutVertices.Store((vidx + 4) << 2, asuint(normal.y));
+    OutVertices.Store((vidx + 5) << 2, asuint(normal.z));
+
+    // Store Tangents
+    OutVertices.Store((vidx + 6) << 2, asuint(tangent.x));
+    OutVertices.Store((vidx + 7) << 2, asuint(tangent.y));
+    OutVertices.Store((vidx + 8) << 2, asuint(tangent.z));
+    OutVertices.Store((vidx + 9) << 2, asuint(radius));
+
+    // Store Color
+    OutVertices.Store((vidx + 10) << 2, asuint(Color.r));
+    OutVertices.Store((vidx + 11) << 2, asuint(Color.g));
+    OutVertices.Store((vidx + 12) << 2, asuint(Color.b));
+    OutVertices.Store((vidx + 13) << 2, asuint(Color.a));
+
+    OutIndices.Store((2 * idx) << 2, asuint(idx));
+    if (idx != arraySize - 1)
+    {
+        OutIndices.Store(((2 * idx + 1)) << 2, asuint(idx + 1));
+    }
+    else
+    {
+        OutIndices.Store(((2 * idx + 1)) << 2, asuint(idx));
+    }
+
+
+}
+

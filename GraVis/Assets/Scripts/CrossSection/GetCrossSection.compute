@@ -1,0 +1,80 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> Result;
+RWStructuredBuffer<float> _Volume;
+
+float4 _Dimensions;
+
+float2 _TextureSize;
+float4 _PlaneOrigin; // Position of the plane (center)
+float3 _Right; // Right and
+float3 _Up; // up vectors of the plane
+float3 _Scale; // Size of the plane
+float4 _Rotation; // Quaternion of roatation
+
+float4 qmul(float4 q1, float4 q2)
+{
+    return float4(
+        q2.xyz * q1.w + q1.xyz * q2.w + cross(q1.xyz, q2.xyz),
+        q1.w * q2.w - dot(q1.xyz, q2.xyz)
+        );
+}
+
+float3 rotate_vector(float4 q, float3 v)
+{
+    float4 r_c = q * float4(-1, -1, -1, 1);
+    return qmul(q, qmul(float4(v, 0), r_c)).xyz;
+}
+
+float3 getValueOfPos(float3 pos)
+{
+    // Space pos is in [0,1], transform it to [0, Dimension]
+    //int3 index = int3((int)(pos.x * _Dimensions.x), (int)(pos.y * _Dimensions.y), (int)(pos.z * _Dimensions.z));
+    int3 index = (int3) round(pos * _Dimensions.xyz);
+    /*
+    if (index.x > _Dimensions.x || index.x < 0
+        || index.y > _Dimensions.y || index.y < 0
+        || index.z > _Dimensions.z || index.z < 0)
+        return float4(0, 0, 0, 0);
+*/
+
+    // Shift of the 4th Dimension (dimension of data sample)
+    int arrayPos = (index.x + _Dimensions.x * index.y + _Dimensions.x * _Dimensions.y * index.z);
+    arrayPos *= (int)_Dimensions.w;
+    // Fill color with 3 subsequent data values (ignore gb values in case of 1-dim data)
+    return float3(
+        _Volume[arrayPos + 0],
+        _Volume[arrayPos + 1],
+        _Volume[arrayPos + 2]);
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // transform pixel space into shifted uv space [0,1] (-> invariant to texture size)
+    float2 uv = float2(((float)id.x + 0.5) / (_TextureSize.x), ((float)id.y+0.5) / (_TextureSize.y));
+
+    // transform uv-space to world-space
+    //  (uv - 0.5): shift uv space to [-0.5,0.5] to have the centers aligned
+    //  *_Scale to be invariant to the scale of the plane
+    float3 worldPos = _PlaneOrigin + (uv.x - 0.5) * _Right * _Scale.x + (uv.y - 0.5) * _Up * _Scale.y;
+
+    // Get position in volume (it is shifted to [0..1, 0..1, 0..1])
+    float3 volumePos = worldPos + float3(0.5, 0.5, 0.5);
+
+    float3 volumeVec = getValueOfPos(volumePos);
+    // Here, Vector elements are interpolated with nn (TODO: lerp, Slerp)
+    float3 pos = _PlaneOrigin + (uv.x - 0.5) * _Right * _Scale.x + (uv.y - 0.5) * _Up * _Scale.y + float3(0.5, 0.5, 0.5);
+    // We need to project the vector onto the plane
+    float3 vec = rotate_vector(_Rotation, getValueOfPos(pos).xyz);
+    float3 col = vec * 500000.0;
+
+    //float depth = col.z + 0.5; // center (col.z = 0) is 
+
+    Result[id.xy] = float4(col.x,col.y, col.z, 1.0);
+    // Result[id.xy] = float4(col, 1.0);
+
+}

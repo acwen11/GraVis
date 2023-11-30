@@ -1,0 +1,41 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+
+Texture2D<float4> Input;
+RWTexture2D<float4> InputFade;
+RWTexture2D<float4> Result;
+int clearfade;
+float fadeOutFactor; // between 0 and 1
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID)
+{
+    // TODO: insert actual code here!
+    float4 fadedValue;
+    if (clearfade == 1)
+    {
+        InputFade[id.xy] = float4(0.0, 0.0, 0.0, 0.0);
+        fadedValue = InputFade[id.xy];
+    }
+        
+    else 
+    {
+        fadedValue =
+            0.5 * InputFade[int2(id.x - 1, id.y - 1)]
+            + InputFade[int2(id.x, id.y - 1)]
+            + 0.5 * InputFade[int2(id.x + 1, id.y - 1)]
+            + InputFade[int2(id.x - 1, id.y)]
+            + InputFade[int2(id.x, id.y)]
+            + InputFade[int2(id.x + 1, id.y)]
+            + 0.5 * InputFade[int2(id.x - 1, id.y + 1)]
+            + InputFade[int2(id.x, id.y + 1)]
+            + 0.5 * InputFade[int2(id.x + 1, id.y + 1)];
+        fadedValue /= 7.0;
+        fadedValue *= fadeOutFactor;
+    }
+    fadedValue*= float4(1.0, 0.99, 0.98, 1);
+    Result[id.xy] = saturate(Input[id.xy] + fadedValue);
+}

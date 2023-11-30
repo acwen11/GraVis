@@ -1,0 +1,109 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Arrows
+#pragma kernel Continous
+#pragma kernel Dashed
+
+RWByteAddressBuffer OutIndices;
+RWByteAddressBuffer OutVertices;
+
+uint arraySize;
+uint timeCounter;
+uint arrowLength;
+uint arrowGap;
+uint arrowHeadLength;
+float baseRadius;
+
+[numthreads(128,1,1)]
+void Arrows(uint3 id : SV_DispatchThreadID)
+{
+    baseRadius = 0.0005f;
+    arrowHeadLength = 10;
+
+    uint idx = id.x;
+    uint vidx = idx * 14;// (3 pos, 4 col, 3 normal)
+    // We construct idxR such that it is always shifted by the timeCounter
+    uint idxR = (idx + timeCounter) % arraySize;
+
+    // SectionLength is the whole length of the arrow itself plus its gap to the neighbor
+    uint sectionLength = arrowLength + arrowGap;
+
+    // The head of the arrow is n points long
+    float radius = baseRadius;
+    if (idxR % sectionLength < arrowHeadLength)
+        radius = baseRadius * (idxR % sectionLength * 0.6);
+    
+    if (idxR % sectionLength >= 0 && idxR % sectionLength < arrowLength)
+    {
+
+        OutVertices.Store((vidx + 9) << 2, asuint(radius)); // We safe the radius in the 4th tangent value
+
+        OutIndices.Store((2 * idx) << 2, asuint(idx));
+        if (idx != arraySize - 1 && idxR % sectionLength != arrowLength - 1)
+        {
+            OutIndices.Store(((2 * idx + 1)) << 2, asuint(idx + 1));
+        }
+        else
+        {
+            OutIndices.Store(((2 * idx + 1)) << 2, asuint(idx));
+        }
+    }       
+    else
+    {
+        // We set every unused vertex index as a pair with itself
+        OutIndices.Store((2 * idx) << 2, asuint(idx));
+        OutIndices.Store((2 * idx + 1) << 2, asuint(idx));
+    }
+
+}
+
+[numthreads(128, 1, 1)]
+void Continous(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    uint vidx = idx * 14; // (3 pos, 4 col, 3 normal)
+    baseRadius = 0.0005f;
+    OutVertices.Store((vidx + 9) << 2, asuint(baseRadius));
+    OutIndices.Store((2 * idx) << 2, asuint(idx));
+    OutIndices.Store(((2 * idx + 1)) << 2, asuint(idx + 1));
+    // we do nothing
+}
+
+[numthreads(128, 1, 1)]
+void Dashed(uint3 id : SV_DispatchThreadID)
+{
+    baseRadius = 0.0005f;
+    arrowHeadLength = 10;
+
+    uint idx = id.x;
+    uint vidx = idx * 14; // (3 pos, 4 col, 3 normal)
+    // We construct idxR such that it is always shifted by the timeCounter
+    uint idxR = (idx + timeCounter) % arraySize;
+
+    // SectionLength is the whole length of the arrow itself plus its gap to the neighbor
+    uint sectionLength = arrowLength + arrowGap;
+
+    float radius = baseRadius;
+    
+    if (idxR % sectionLength >= 0 && idxR % sectionLength < arrowLength)
+    {
+
+        OutVertices.Store((vidx + 9) << 2, asuint(radius)); // We safe the radius in the 4th tangent value
+
+        OutIndices.Store((2 * idx) << 2, asuint(idx));
+        if (idx != arraySize - 1 && idxR % sectionLength != arrowLength - 1)
+        {
+            OutIndices.Store(((2 * idx + 1)) << 2, asuint(idx + 1));
+        }
+        else
+        {
+            OutIndices.Store(((2 * idx + 1)) << 2, asuint(idx));
+        }
+    }
+    else
+    {
+        // We set every unused vertex index as a pair with itself
+        OutIndices.Store((2 * idx) << 2, asuint(idx));
+        OutIndices.Store((2 * idx + 1) << 2, asuint(idx));
+    }
+
+}

@@ -1,0 +1,402 @@
+#pragma kernel GlassDVR
+#pragma kernel DensityDVR
+
+
+#include "Assets/Shaders/Library.cginc"
+
+RWTexture2D<float4> Result;
+Texture2D<float4> _Source;
+RWStructuredBuffer<float> _Volume;
+
+Texture2D<float4> _SkyboxTexture;
+
+
+
+SamplerState sampler_SkyboxTexture;
+SamplerState sampler_Source;
+SamplerState sampler_VolumeTex;
+
+float3 _BoxExtents;
+
+float _IntensityMultiply;
+float4 _Dimensions;
+float4x4 _CameraToWorld;
+float4x4 _CameraInverseProjection;
+float3 _WorldCameraPos;
+
+Texture2D<float4> _PositionTexture;
+// *** Data for crossSection
+
+float4 _PlaneOrigin; // Position of the plane (center)
+float3 _Right; // Right and
+float3 _Up; // up vectors of the plane
+float3 _Scale; // Size of the plane
+float4 _Rotation; // Quaternion of roatation
+float3 _CrosssectionNormal;
+
+// ***
+
+// *** Data for quality control
+float _SamplingStepsize; // in voxelsize (max dimension)
+
+// ***
+
+#define NUM_SAMPLES 6400
+
+Ray CreateRay(float3 origin, float3 direction)
+{
+    Ray ray;
+    ray.origin = origin;
+    ray.direction = direction;
+    return ray;
+}
+
+Ray CreateCameraRay(float2 uv)
+{
+    // Transform the camera origin to world space
+    float3 origin = mul(_CameraToWorld, float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
+
+    // Invert the perspective projection of the view-space position
+    float3 direction = mul(_CameraInverseProjection, float4(uv, 0.0f, 1.0f)).xyz;
+    // Transform the direction from camera to world space and normalize
+    direction = mul(_CameraToWorld, float4(direction, 0.0f)).xyz;
+    direction = normalize(direction);
+    return CreateRay(origin, direction);
+}
+
+float3 drawSphere(float2 uv)
+{
+    // Invert the perspective projection of the view-space position
+    float3 direction = mul(_CameraInverseProjection, float4(uv, 0.0f, 1.0f)).xyz;
+    // Transform the direction from camera to world space and normalize
+    direction = mul(_CameraToWorld, float4(direction, 0.0f)).xyz;
+    direction = normalize(direction);
+
+    float theta = acos(direction.y) / -PI;
+    float phi = atan2(direction.x, -direction.z) / -PI * 0.5f;
+    return float3(1.0, 1.0, 1.0);//_SkyboxTexture.SampleLevel(sampler_SkyboxTexture, float2(phi, theta), 0).xyz;
+}
+
+float4 getValueOfPos3D(float3 pos)
+{
+    // We assume the data position in scene space is in [-0.5, -0.5]^3. 
+    // TODO: Read scene space position and extensions
+    // Therefore, we shift the scene position into the data position [0, Dimension]^3
+    //int3 index = int3((int)(pos.x * _Dimensions.x), (int)(pos.y * _Dimensions.y), (int)(pos.z * _Dimensions.z));
+    int3 index = (int3) round((pos + float3(0.5,0.5,0.5)) * _Dimensions.xyz);
+
+    // Shift of the 4th Dimension (dimension of data sample)
+    int arrayPos = (index.x + _Dimensions.x * index.y + _Dimensions.x * _Dimensions.y * index.z);
+    arrayPos *= (int)_Dimensions.w;
+    // Fill color with 3 subsequent data values (ignore gb values in case of 1-dim data)
+    return float4(
+        clamp(abs(_Volume[arrayPos + 0]), 0, 1),
+        clamp(abs(_Volume[arrayPos + 1]), 0, 1),
+        clamp(abs(_Volume[arrayPos + 2]), 0 ,1),
+        0);
+}
+
+float getValueOfPos(float3 pos)
+{
+    // We assume the data position in scene space is in [-0.5, -0.5]^3. 
+    // TODO: Read scene space position and extensions
+    // Therefore, we shift the scene position into the data position [0, Dimension]^3
+    //int3 index = int3((int)(pos.x * _Dimensions.x), (int)(pos.y * _Dimensions.y), (int)(pos.z * _Dimensions.z));
+    int3 index = (int3) round((pos + float3(0.5, 0.5, 0.5)) * _Dimensions.xyz);
+
+    // Shift of the 4th Dimension (dimension of data sample)
+    int arrayPos = (index.x + _Dimensions.x * index.y + _Dimensions.x * _Dimensions.y * index.z);
+    // Fill color with 3 subsequent data values (ignore gb values in case of 1-dim data)
+    return _Volume[arrayPos];
+        
+}
+
+float getTrilinearValueOfPos(float3 pos)
+{
+
+    float3 index = (pos + float3(0.5, 0.5, 0.5)) * _Dimensions.xyz;
+
+    return _VolumeTex.SampleLevel(sampler_VolumeTex, pos + float3(0.5, 0.5, 0.5), 0);
+}
+
+struct VolumeHit
+{
+    float3 start;
+    float3 end;
+};
+
+VolumeHit GetStartAndEntryPos(Ray ray)
+{
+    // Needs optimization
+
+    VolumeHit output;
+
+    float2 intersections = intersectAABB(ray, _BoxExtents);
+
+    // no intersection
+    if (intersections.x > intersections.y || intersections.y < 0 ) 
+    {
+        output.start = float3(0, 0, 0);
+        output.end = float3(0, 0, 0);
+        return output;
+    }
+    // start inside box
+    if (intersections.x < 0 && intersections.y > 0) 
+    {
+        output.start = ray.origin;
+        output.end = float3(ray.origin + intersections.y * ray.direction);
+        return output;
+    }
+    // ray intersects box in 2 points in front of the camera
+    output.start = float3(ray.origin + intersections.x * ray.direction);
+    output.end = float3(ray.origin + intersections.y * ray.direction);
+    return output;  
+}
+
+[numthreads(8, 8, 1)]
+void GlassDVR(uint3 id : SV_DispatchThreadID)
+{
+    // Get the dimensions of the RenderTexture
+    uint width, height;
+    Result.GetDimensions(width, height);    
+    
+    float2 imgUV = float2(id.xy / float2(width, height));
+    // Transform pixel to [-1,1] range
+    float2 uv = float2((id.xy + float2(0.5f, 0.5f)) / float2(width, height) * 2.0f - 1.0f);
+    Ray ray = CreateCameraRay(uv);
+    
+    // Calculate entry and exit point of the volume
+    VolumeHit volumeIntersection = GetStartAndEntryPos(ray);
+
+    float3 start = volumeIntersection.start;
+    float3 end = volumeIntersection.end;
+
+    if (length(start-end) < 0.0001) // no hit at all
+    {
+        Result[id.xy] = _Source.SampleLevel(sampler_Source, imgUV, 0);
+        // Result[id.xy] = float4(drawSphere(uv), 1.0f); Legacy for sphere drawing
+        return;
+    }
+
+    float3 pos = start;
+    float3 direction = -normalize(start - end);
+
+    int maxDim = max(_Dimensions.x, max(_Dimensions.y, _Dimensions.z));
+    float nyquistRate = _SamplingStepsize / maxDim;//_SamplingStepsize
+
+    float3 ds = nyquistRate * direction;
+    float samplingDensity = nyquistRate;
+    int nSamples = 2.0f * 1.0/ nyquistRate;
+    float4 DegradeColor = float4(0.5, 0.7, 1, -0.1) / 6.0  * nyquistRate*maxDim;
+
+    float maxLength = length(end - start);
+    float density = 0.0f;
+    float4 col = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float4 alphacol = float4(0.1f, 0.2f, 0.5f, 1.0f);
+    // We calculate the length of the current ray by iteratively adding the length of 'ds'
+    // Downside is a small numerical error over time
+
+    float distanceLength = length(ds);
+    float vectorLength = 0;
+    
+    // Calculates the distance from camera to an Object in the scene
+
+    float3 camPos = mul(_CameraToWorld, float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
+    
+    float distanceToObject = _PositionTexture[id.xy].r;
+    if (_PositionTexture[id.xy].r == 0)
+        distanceToObject = 999999;
+
+    float threshold = 0.1f;
+    float colTransp = 0.0f;
+    bool covered = false;
+
+    float distanceStreamline = _Source.SampleLevel(sampler_Source, imgUV, 0).a;
+    distanceStreamline = distanceStreamline > 1 ? distanceStreamline - 1 : 999999;
+    //sampling through the volume and blend the densities
+    for (int i = 0; i < nSamples; i++, pos += ds)
+    {
+        // Calculates, if the position is behind the cross section
+        float3 toCrossSectionMid = _PlaneOrigin - pos;
+
+        // calculates, if the position is behind a streamline
+        if (length(pos - camPos) > distanceStreamline)
+            break;
+
+        float doContribute = step(dot(_CrosssectionNormal, toCrossSectionMid), 0);
+        //float doContribute = dot(_CrosssectionNormal, toCrossSectionMid);
+        vectorLength += distanceLength;
+        /*
+        if (length(pos - camPos) > distanceToObject)
+        {
+            break;
+        }
+        */
+
+        float sampleValue = getTrilinearValueOfPos(pos) * 10000;
+        float val = sampleValue * samplingDensity * _IntensityMultiply * doContribute;
+
+        if (sampleValue * doContribute > threshold)
+        {
+            alphacol += DegradeColor;
+            col = alphacol;
+        }
+        if (sampleValue * (1-doContribute) > threshold)
+        {
+            covered = true;
+            break;
+        }
+        col = clamp(col, float4(0, 0, 0, 0), float4(1, 1, 1, 1));
+
+        //if (distanceToObject < vectorLength)
+        //    break;
+
+        if (vectorLength > maxLength)
+            break;
+    }
+    //color = float3(length(start - end), 0.0f, 0.0f);
+    //col.a = col.r;
+    //col = float4(1, 0, 0, colTransp * 1000000.0);
+    col.a = clamp(col.a, 0, 1);
+    if (covered)
+    {
+        col = col.a* col + (1.0f - col.a)*float4(0.5, 0.7, 1.0, 0.5);
+    }
+    col.a = clamp(col.a, 0, 1);
+    if (col.a < 1.0f)
+        col.rgb = col.rgb * col.a + (1.0 - col.a) * _Source.SampleLevel(sampler_Source, imgUV, 0);// drawSphere(uv);
+
+    //float4 color = density * float4(1, 1, 1, 1); //tex2D(_DensityGradient, float2(density, 0)) * (1.0 - density); //lookup which color to use for given density
+    Result[id.xy] = float4(col.rgb, col.a);
+    //float4(distance, distance, distance, distance);
+    //_Source.SampleLevel(sampler_Source, imgUV, 0).aaaa; // 
+    //Result[id.xy] = float4(_CameraDepthTexture[id.xy] * 1000.0f, 0, 0, 1) ;
+}
+
+[numthreads(8, 8, 1)]
+void DensityDVR(uint3 id : SV_DispatchThreadID)
+{
+    // Get the dimensions of the RenderTexture
+    uint width, height;
+    Result.GetDimensions(width, height);
+
+    float2 imgUV = float2(id.xy / float2(width, height));
+    // Transform pixel to [-1,1] range
+    float2 uv = float2((id.xy + float2(0.5f, 0.5f)) / float2(width, height) * 2.0f - 1.0f);
+    Ray ray = CreateCameraRay(uv);
+
+    // Calculate entry and exit point of the volume
+    VolumeHit volumeIntersection = GetStartAndEntryPos(ray);
+
+    float3 start = volumeIntersection.start;
+    float3 end = volumeIntersection.end;
+
+    if (length(start - end) < 0.0001) // no hit at all
+    {
+        Result[id.xy] = _Source.SampleLevel(sampler_Source, imgUV, 0);
+        // Result[id.xy] = float4(drawSphere(uv), 1.0f); Legacy for sphere drawing
+        return;
+    }
+
+    float3 pos = start;
+    float3 direction = -normalize(start - end);
+
+    int maxDim = max(_Dimensions.x, max(_Dimensions.y, _Dimensions.z));
+    float nyquistRate = _SamplingStepsize / maxDim;//_SamplingStepsize
+
+    float3 ds = nyquistRate * direction;
+    float samplingDensity = nyquistRate;
+    int nSamples = 2.0f * 1.0 / nyquistRate;
+    float4 DegradeColor = float4(0.5, 0.7, 1, -0.1) / 6.0 * nyquistRate * maxDim;
+
+    float maxLength = length(end - start);
+    float density = 0.0f;
+    float4 col = float4(0.0f, 0.0f, 0.0f, 0.0f);
+    float4 alphacol = float4(0.1f, 0.2f, 0.5f, 1.0f);
+    // We calculate the length of the current ray by iteratively adding the length of 'ds'
+    // Downside is a small numerical error over time
+
+    float distanceLength = length(ds);
+    float vectorLength = 0;
+
+    // Calculates the distance from camera to an Object in the scene
+
+    float3 camPos = mul(_CameraToWorld, float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
+
+    float distanceToObject = _PositionTexture[id.xy].r;
+    if (_PositionTexture[id.xy].r == 0)
+        distanceToObject = 999999;
+
+    float threshold = 0.1f;
+    float colTransp = 0.0f;
+    bool covered = false;
+    //sampling through the volume and blend the densities
+    for (int i = 0; i < nSamples; i++, pos += ds)
+    {
+        // Calculates, if the position is behind the cross section
+        float3 toCrossSectionMid = _PlaneOrigin - pos;
+
+        float doContribute = step(dot(_CrosssectionNormal, toCrossSectionMid), 0);
+        //float doContribute = dot(_CrosssectionNormal, toCrossSectionMid);
+        vectorLength += distanceLength;
+
+        if (length(pos - camPos) > distanceToObject)
+        {
+            break;
+        }
+
+        //col += getValueOfPos3D(pos) * samplingDensity * _IntensityMultiply * 10000.0 *doContribute;
+
+            ///getValueOfPos(pos) * samplingDensity * _IntensityMultiply * 10000.0 * doContribute;
+        float sampleValue = getTrilinearValueOfPos(pos) * 10000;
+        float val = sampleValue * samplingDensity * _IntensityMultiply * doContribute;
+        //colTransp = max(sampleValue, colTransp);
+        if (sampleValue * doContribute > threshold)
+        {
+            alphacol += DegradeColor;
+            col = alphacol;
+            //break;
+        }
+        if (sampleValue * (1 - doContribute) > threshold)
+        {
+            covered = true;
+        }
+        col = clamp(col, float4(0, 0, 0, 0), float4(1, 1, 1, 1));
+        /*
+        if (col.r > 1)
+            col.r = 1;
+        if (col.g > 1)
+            col.g = 1;
+        if (col.b > 1)
+            col.b = 1;
+            */
+            //color.g += length(pos - start) / maxLength;
+            //color.r  = clamp(color, float4(1, 1, 1, 1), float4(0, 0, 0, 0));
+            //float D = Sample(start);
+
+            //density *= 1.0 - saturate(D * 1.0f);
+
+            //if (density <= 0.01) break;
+        if (distanceToObject < vectorLength)
+            break;
+        //if (dot(start, ds) > dot(worldDepthPoint, ds) + 0.001) //check if the sampling ray hits another object from the scene
+        //    break;
+        if (vectorLength > maxLength)
+            break;
+    }
+    //color = float3(length(start - end), 0.0f, 0.0f);
+    //col.a = col.r;
+    //col = float4(1, 0, 0, colTransp * 1000000.0);
+    col.a = clamp(col.a, 0, 1);
+    if (covered)
+    {
+        col = col.a * col + (1.0f - col.a) * float4(0.5, 0.7, 1.0, 0.5);
+    }
+    col.a = clamp(col.a, 0, 1);
+    if (col.a < 1.0f)
+        col.rgb = col.rgb * col.a + (1.0 - col.a) * _Source.SampleLevel(sampler_Source, imgUV, 0).xyz;// drawSphere(uv);
+
+    //float4 color = density * float4(1, 1, 1, 1); //tex2D(_DensityGradient, float2(density, 0)) * (1.0 - density); //lookup which color to use for given density
+    Result[id.xy] = float4(col.rgb, col.a);
+    //Result[id.xy] = float4(_CameraDepthTexture[id.xy] * 1000.0f, 0, 0, 1) ;
+}
