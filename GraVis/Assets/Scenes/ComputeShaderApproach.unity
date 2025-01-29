@@ -1995,7 +1995,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f8d0073a5de561c40985fcd60f50bbdb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  rootDirectory: F:/DataInterface
+  rootDirectory: C:\Users\Allen\Time-Variant-Vector-Field-Visualization-for-Magnetic-Fields-of-Neutron-Star-Simulations-GraVis-\GraVis\DataInterface
   LoadedTimestep: 0
 --- !u!4 &250107012
 Transform:
@@ -3752,13 +3752,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c5b1ec03582167342a0d2f09ef26e590, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  PathToFiles: F:/DataInterface/otdata/Rho/
-  Name: Rho
+  PathToFiles: DataInterface\otdata\B\
+  Name: B
   SampleDimension: 1
   Dimensions: {x: 256, y: 256, z: 256}
   DoWork: 0
   Generate3DPreview: 0
-  FileCount: 50
+  FileCount: 154
 --- !u!4 &1050572988
 Transform:
   m_ObjectHideFlags: 0

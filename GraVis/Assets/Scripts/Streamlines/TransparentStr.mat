@@ -64,7 +64,7 @@ Material:
     - _Mode: 0
     m_Floats:
     - _BumpScale: 1
-    - _ChromaScaling: 0.12474148
+    - _ChromaScaling: 0.5
     - _Cutoff: 0.5
     - _DetailNormalMapScale: 1
     - _DstBlend: 0

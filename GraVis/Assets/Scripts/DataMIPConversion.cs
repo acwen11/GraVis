@@ -68,7 +68,7 @@ public class DataMIPConversion : MonoBehaviour
             }
             else
             {
-                //Debug.Log("File " + fullFileName + " does not exist.");
+                Debug.Log("File " + fullFileName + " does not exist.");
                 return;
             }
 
@@ -102,7 +102,7 @@ public class DataMIPConversion : MonoBehaviour
                 }
                 else
                 {
-                    //Debug.Log("File " + fullFileName + " does not exist.");
+                    Debug.Log("File " + fullFileName + " does not exist.");
                     continue;
                 }
                 
@@ -113,7 +113,7 @@ public class DataMIPConversion : MonoBehaviour
                     WriteData(PathToFiles + name, mipLevel);
                 }
 
-                //Debug.Log("Converted " + i + " of " + FileCount.ToString());
+                Debug.Log("Converted " + i + " of " + FileCount.ToString());
                 conversionCount++;
             }
 

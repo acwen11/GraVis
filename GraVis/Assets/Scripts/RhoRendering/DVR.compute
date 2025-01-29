@@ -25,6 +25,7 @@ float4x4 _CameraInverseProjection;
 float3 _WorldCameraPos;
 
 Texture2D<float4> _PositionTexture;
+Texture3D<float4> _VolumeTex;
 // *** Data for crossSection
 
 float4 _PlaneOrigin; // Position of the plane (center)
