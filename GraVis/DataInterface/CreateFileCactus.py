@@ -5,17 +5,17 @@ from kuibit.simdir import SimDir
 import numpy
 import struct
 import time
-#source_path = "data/" # "E:/SimulationData/data/"
-datadir = "/lagoon/allenwen/LDP_LR_noleak" # "E:/SimulationData/data/"
-pickle_file = "/lagoon/allenwen/LDP_LR_noleak.pickle" # "E:/SimulationData/data/"
 shape = [256, 256, 256]
 
 # The code can currently only handle data in a 256^3 point grid. Set the corners of the cube here.
 x0 = [-24, -24, -24]
 x1 = [24, 24, 24]
 
-
+# File read parameters
+datadir = "/lagoon/allenwen/LDP_LR_noleak" # where output-xxxx directories are found
+pickle_file = "/lagoon/allenwen/LDP_LR_noleak.pickle" # set to None if no pickle file
 total = 124 # Number of 3D snapshots. 1798 is the max
+outeveryxyz = 8192 # 3D output frequency
 
 # Enable to generate scalar or vector output. Rho isosurface rendering is currently broken but the code requires these files to exist anyway.
 transformVectorData = True 
@@ -106,7 +106,7 @@ if (transformRhoData):
 	rangelist = list(range(0,total))
 	for i in rangelist:
 		print("Reading output {:d} of {:d}.\n".format(i, total))
-		iteration = i * 8192
+		iteration = i * outeveryxyz
 		start_time_sample = time.time()
 
 		rhodata = rho[iteration].to_UniformGridData(shape, x0, x1).data.flatten()
@@ -140,7 +140,7 @@ if (transformVectorData):
 	rangelist = list(range(0,total))
 	for i in rangelist:
 		print("Reading output {:d} of {:d}.\n".format(i, total))
-		iteration = i * 8192
+		iteration = i * outeveryxyz
 		start_time_sample = time.time()
 
 		Bxdata = Bx[iteration].to_UniformGridData(shape, x0, x1).data.flatten()
